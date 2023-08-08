@@ -29,15 +29,18 @@ class ConditionalFlowMatcher:
     - score function $\nabla log p_t(x|x0, x1)$
     """
 
-    def __init__(self, sigma: float = 0.0):
+    def __init__(self, sigma: float = 0.0, independent=True):
         r"""Initialize the ConditionalFlowMatcher class. It requires the [GIVE MORE DETAILS] hyper-
         parameter $\sigma$.
 
         Parameters
         ----------
         sigma : float
+        independent: bool
+          if true independent cfm impl. from [1] otherwise basic cfm
         """
         self.sigma = sigma
+        self.independent = independent
 
     def compute_mu_t(self, x0, x1, t):
         """
@@ -60,7 +63,9 @@ class ConditionalFlowMatcher:
         [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
         """
         t = pad_t_like_x(t, x0)
-        return t * x1 + (1 - t) * x0
+        if self.independent:
+            return t * x1 + (1 - t) * x0
+        return t*x1
 
     def compute_sigma_t(self, t):
         """
@@ -82,8 +87,10 @@ class ConditionalFlowMatcher:
         ----------
         [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
         """
-        del t
-        return self.sigma
+        # del t
+        if self.independent:
+            return self.sigma
+        return t*self.sigma - t + 1
 
     def sample_xt(self, x0, x1, t, epsilon):
         """
@@ -134,8 +141,10 @@ class ConditionalFlowMatcher:
         ----------
         [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
         """
-        del t, xt
-        return x1 - x0
+        sigma_t = self.compute_sigma_t(t)
+        if self.independent:
+            return x1 - x0
+        return (x1 - (1-self.sigma)*xt)/sigma_t[:, None, None, None]
 
     def sample_noise_like(self, x):
         return torch.randn_like(x)
@@ -215,7 +224,7 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
         sigma : float
         ot_sampler: exact OT method to draw couplings (x0, x1) (see Eq.(17) [1]).
         """
-        self.sigma = sigma
+        super().__init__(sigma=sigma, independent=True)
         self.ot_sampler = OTPlanSampler(method="exact")
 
     def sample_location_and_conditional_flow(self, x0, x1, y0=None, y1=None, return_noise=False):
@@ -344,6 +353,7 @@ class SchrodingerBridgeConditionalFlowMatcher(ConditionalFlowMatcher):
         sigma : float
         ot_sampler: exact OT method to draw couplings (x0, x1) (see Eq.(17) [1]).
         """
+        super().__init__(sigma=sigma, independent=True)
         self.sigma = sigma
         self.ot_method = ot_method
         self.ot_sampler = OTPlanSampler(method=ot_method, reg=2 * self.sigma**2)
